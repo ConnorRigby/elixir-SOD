@@ -18,7 +18,7 @@ ERL_NIF_TERM make_ok_tuple(ErlNifEnv *env, ERL_NIF_TERM value)
 
 ERL_NIF_TERM make_error_tuple(ErlNifEnv *env, const char *reason)
 {
-    return enif_make_tuple2(env, make_atom(env, "error"), make_atom(env, reason));
+    return enif_make_tuple2(env, make_atom(env, "error"), make_binary(env, reason, strlen(reason)));
 }
 
 ERL_NIF_TERM make_binary(ErlNifEnv *env, const void *bytes, unsigned int size)

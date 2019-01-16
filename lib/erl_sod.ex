@@ -13,5 +13,18 @@ defmodule :erl_sod_nif do
     end
   end
 
-  def start(), do: :erlang.nif_error("erl_video_capture not loaded")
+  def open do
+    {:ok, conn} = start()
+    ref = make_ref()
+    net_open(conn, ref, self(), '/tmp/hello')
+
+    receive do
+      msg -> msg
+    after
+      5000 -> exit(:timeout)
+    end
+  end
+
+  def start(), do: :erlang.nif_error("erl_sod not loaded")
+  def net_open(_conn, _ref, _pid, _filename), do: :erlang.nif_error("erl_sod not loaded")
 end

@@ -21,11 +21,15 @@ all: priv priv/erl_sod_nif.so
 priv:
 	mkdir -p priv
 
-priv/erl_sod_nif.so: c_src/enif_util.c c_src/erl_sod_nif.c c_src/queue.c
+$(SOD_RELEASE_DIR)/sod.o: $(SOD_RELEASE_DIR)/sod.c
+	$(CC) $(CFLAGS) $(LDFLAGS) $(SOD_RELEASE_DIR)/sod.c -o $(SOD_RELEASE_DIR)/sod.o
+
+priv/erl_sod_nif.so: c_src/enif_util.c c_src/erl_sod_nif.c c_src/queue.c $(SOD_RELEASE_DIR)/sod.o
 	$(CC) $(CFLAGS) $(LDFLAGS) \
 		c_src/enif_util.c c_src/erl_sod_nif.c c_src/queue.c \
-		$(SOD_RELEASE_DIR)/sod.c \
+		$(SOD_RELEASE_DIR)/sod.o \
 		-o priv/erl_sod_nif.so
 
 clean:
 	$(RM) priv/erl_sod_nif.so
+	$(RM) $(SOD_RELEASE_DIR)/sod.o

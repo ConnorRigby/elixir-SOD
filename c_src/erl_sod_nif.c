@@ -21,6 +21,7 @@
 #include "erl_nif.h"
 #include "enif_util.h"
 #include "queue.h"
+#include "sod.h"
 
 #define MAX_PATHNAME 512
 #define UNUSED(x) (void)(x)
@@ -31,11 +32,14 @@ typedef struct {
     ErlNifThreadOpts* opts;
     ErlNifPid notification_pid;
     queue *commands;
+    sod_cnn *net;
 } erl_sod_connection;
 
 typedef enum {
     cmd_unknown,
     cmd_stop,
+    cmd_net_open,
+    cmd_net_close
 } command_type;
 
 typedef struct {
@@ -82,10 +86,46 @@ command_create()
 }
 
 static ERL_NIF_TERM
+do_net_open(ErlNifEnv *env, erl_sod_connection* conn, const ERL_NIF_TERM arg)
+{
+    char filename[MAX_PATHNAME];
+    unsigned int size;
+    int rc;
+
+    size = enif_get_string(env, arg, filename, MAX_PATHNAME, ERL_NIF_LATIN1);
+    if(size <= 0)
+        return make_error_tuple(env, "invalid_filename");
+
+    const char *net_error; /* Error log if any */
+    enif_fprintf(stderr, "HERE\r\n");
+    rc = sod_cnn_create(&conn->net, ":fast", filename, &net_error);
+
+    if (rc != SOD_OK) {
+        conn->net = NULL;
+        return make_error_tuple(env, net_error);
+    }
+    return make_atom(env, "ok");
+}
+
+static ERL_NIF_TERM
+do_net_close(ErlNifEnv *env, erl_sod_connection* conn)
+{
+    if(conn->net) {
+        sod_cnn_destroy(conn->net);
+        conn->net = NULL;
+    }
+    return make_atom(env, "ok");
+}
+
+static ERL_NIF_TERM
 evaluate_command(erl_sod_command *cmd, erl_sod_connection *conn)
 {
     UNUSED(conn);
     switch(cmd->type) {
+      case cmd_net_open:
+        return do_net_open(cmd->env, conn, cmd->arg);
+      case cmd_net_close:
+        return do_net_close(cmd->env, conn);
       default:
         return make_error_tuple(cmd->env, "invalid_command");
     }
@@ -163,15 +203,52 @@ erl_sod_start(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
     return make_ok_tuple(env, conn_resource);
 }
 
+static ERL_NIF_TERM
+erl_sod_net_open(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+    erl_sod_connection *conn;
+    erl_sod_command *cmd = NULL;
+    ErlNifPid pid;
+
+    if(argc != 4)
+	    return enif_make_badarg(env);
+    if(!enif_get_resource(env, argv[0], erl_sod_type, (void **) &conn))
+	    return enif_make_badarg(env);
+    if(!enif_is_ref(env, argv[1]))
+	    return make_error_tuple(env, "invalid_ref");
+    if(!enif_get_local_pid(env, argv[2], &pid))
+	    return make_error_tuple(env, "invalid_pid");
+    if(!enif_is_list(env, argv[3]))
+	    return make_error_tuple(env, "invalid_arg");
+
+    /* Note, no check is made for the type of the argument */
+    cmd = command_create();
+    if(!cmd)
+	    return make_error_tuple(env, "command_create_failed");
+
+    cmd->type = cmd_net_open;
+    cmd->ref = enif_make_copy(cmd->env, argv[1]);
+    cmd->pid = pid;
+    cmd->arg = enif_make_copy(cmd->env, argv[3]);
+
+    return push_command(env, conn, cmd);
+}
+
 static void
 destruct_sod_connection(ErlNifEnv* env, void *arg)
 {
     UNUSED(env);
     enif_fprintf(stderr, "destruct sod_conn\r\n");
     erl_sod_connection *conn = (erl_sod_connection *) arg;
+    erl_sod_command *close_cmd = command_create();
     erl_sod_command *stop_cmd = command_create();
 
-    /* Send the stop command
+    /* Send the close command
+    */
+    close_cmd->type = cmd_net_close;
+    queue_push(conn->commands, close_cmd);
+
+        /* Send the stop command
     */
     stop_cmd->type = cmd_stop;
     queue_push(conn->commands, stop_cmd);
@@ -227,5 +304,6 @@ static int on_upgrade(ErlNifEnv* env, void** old, void** new, ERL_NIF_TERM term)
 
 static ErlNifFunc nif_funcs[] = {
     {"start", 0, erl_sod_start, 0},
+    {"net_open", 4, erl_sod_net_open, 0}
 };
 ERL_NIF_INIT(erl_sod_nif, nif_funcs, on_load, on_reload, on_upgrade, NULL);
